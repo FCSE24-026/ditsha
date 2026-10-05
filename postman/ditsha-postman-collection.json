@@ -1,0 +1,16 @@
+{
+  "info": {
+    "name": "Ditsha API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "request": { "method": "GET", "url": { "raw": "http://localhost:3000/api/health", "protocol": "http", "host": ["localhost"], "port": "3000", "path": ["api","health"] } }
+    },
+    {
+      "name": "Register Citizen",
+      "request": { "method": "POST", "header": [{"key":"Content-Type","value":"application/json"}], "body": { "mode":"raw","raw":"{\n  \"national_id\": \"BW123456789\",\n  \"full_name\": \"John Doe\",\n  \"email\": \"john@example.com\",\n  \"password\": \"secret123\",\n  \"phone\": \"+26776123456\",\n  \"district\": \"Gaborone\"\n}" }, "url": { "raw": "http://localhost:3000/api/auth/citizen/register", "protocol": "http", "host": ["localhost"], "port": "3000", "path": ["api","auth","citizen","register"] } }
+    }
+  ]
+}

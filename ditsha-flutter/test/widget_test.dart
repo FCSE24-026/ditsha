@@ -26,7 +26,7 @@ void main() {
     await tester.pumpWidget(MaterialApp(
       home: HomePage(
         api: api,
-        session: {'full_name': 'Test Citizen', 'token': 'test-token'},
+        session: const {'full_name': 'Test Citizen', 'token': 'test-token'},
         onSignOut: () {},
       ),
     ));

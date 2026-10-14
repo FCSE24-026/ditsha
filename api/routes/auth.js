@@ -144,4 +144,28 @@ router.get('/citizen/me', async (req, res) => {
   }
 });
 
+router.put('/citizen/me', async (req, res) => {
+  const token = String(req.headers.authorization || '').replace(/^Bearer\s+/, '');
+  try {
+    const payload = jwt.verify(token, config.jwtSecret);
+    if (!payload.citizen_id) return res.status(403).json({ message: 'Citizen access required' });
+    const { full_name, phone, district } = req.body;
+    if (!full_name || full_name.trim().length < 2) {
+      return res.status(400).json({ message: 'Valid full name is required' });
+    }
+    const result = await db.query(
+      `UPDATE citizen
+       SET full_name = $1, phone = COALESCE($2, phone), district = COALESCE($3, district)
+       WHERE citizen_id = $4
+       RETURNING citizen_id, national_id, full_name, email, phone, district, created_at`,
+      [full_name.trim(), phone ? phone.trim() : null, district ? district.trim() : null, payload.citizen_id],
+    );
+    if (!result.rowCount) return res.status(404).json({ message: 'Citizen not found' });
+    res.json({ citizen: result.rows[0], message: 'Profile updated successfully' });
+  } catch (err) {
+    res.status(401).json({ message: 'Invalid token' });
+  }
+});
+
 module.exports = router;
+

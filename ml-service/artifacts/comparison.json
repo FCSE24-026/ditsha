@@ -1,0 +1,60 @@
+{
+  "dataset": {
+    "source": "synthetic",
+    "size": 600,
+    "seed": 42,
+    "target": "label_incomplete",
+    "positive_rate": 0.8
+  },
+  "logistic-regression": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "pr_auc": 1.0,
+    "confusion_matrix": [
+      [
+        30,
+        0
+      ],
+      [
+        0,
+        120
+      ]
+    ],
+    "training_ms": 189.385
+  },
+  "decision-tree": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "pr_auc": 1.0,
+    "confusion_matrix": [
+      [
+        30,
+        0
+      ],
+      [
+        0,
+        120
+      ]
+    ],
+    "training_ms": 21.818
+  },
+  "random-forest": {
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "pr_auc": 1.0,
+    "confusion_matrix": [
+      [
+        30,
+        0
+      ],
+      [
+        0,
+        120
+      ]
+    ],
+    "training_ms": 349.027
+  }
+}

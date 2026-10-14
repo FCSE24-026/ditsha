@@ -31,6 +31,7 @@ class AssistanceResponse(BaseModel):
     reasons: list[str]
     model_version: str
     deterministic: bool
+    priority_score: float
     created_at: datetime
 
 
@@ -60,6 +61,25 @@ def assist(features: ApplicationFeatures) -> AssistanceResponse:
     if not features.description or len(features.description.strip()) < 20:
         completeness = max(0.0, completeness - 0.2)
     category = "complete" if not reasons else "needs_review"
+
+    # Transparent queue priority formula:
+    # Based on completeness (weight 0.4), application age (weight 0.4), and land board workload factor (weight 0.2)
+    age_days = 0.0
+    if features.submitted_at:
+        try:
+            delta = datetime.now(timezone.utc) - features.submitted_at
+            age_days = max(0.0, delta.total_seconds() / 86400.0)
+        except Exception:
+            age_days = 0.0
+
+    # Age factor: normalized up to 90 days
+    age_factor = min(1.0, age_days / 90.0)
+    # Workload factor: normalized up to 100 cases
+    workload_factor = min(1.0, features.land_board_workload / 100.0)
+    
+    # Priority score: Higher means should be prioritized sooner (older + more complete)
+    priority_score = round(0.4 * completeness + 0.4 * age_factor + 0.2 * workload_factor, 4)
+
     return AssistanceResponse(
         application_id=features.application_id,
         score=round(completeness, 5),
@@ -67,5 +87,6 @@ def assist(features: ApplicationFeatures) -> AssistanceResponse:
         reasons=reasons,
         model_version=MODEL_VERSION,
         deterministic=True,
+        priority_score=priority_score,
         created_at=datetime.now(timezone.utc),
     )

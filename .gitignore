@@ -13,3 +13,4 @@ coverage/
 .env
 __pycache__/
 *.pyc
+api/private-documents/

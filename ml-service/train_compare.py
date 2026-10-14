@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 import joblib
+import numpy as np
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
@@ -44,17 +45,14 @@ def main():
     features = ["application_type", "required_document_count", "supplied_document_count",
                 "description_length", "duplicate_active_count"]
     target = "label_incomplete"
-    x = [{key: row[key] for key in features} for row in records]
-    y = [row[target] for row in records]
+    x = np.array([[row[key] for key in features] for row in records], dtype=object)
+    y = np.array([row[target] for row in records], dtype=int)
     x_train, x_test, y_train, y_test = train_test_split(
         x, y, test_size=0.25, random_state=SEED, stratify=y
     )
     preprocessor = ColumnTransformer([
-        ("category", OneHotEncoder(handle_unknown="ignore"), ["application_type"]),
-        ("numeric", StandardScaler(), [
-            "required_document_count", "supplied_document_count",
-            "description_length", "duplicate_active_count",
-        ]),
+        ("category", OneHotEncoder(handle_unknown="ignore"), [0]),
+        ("numeric", StandardScaler(), [1, 2, 3, 4]),
     ])
     candidates = {
         "logistic-regression": LogisticRegression(random_state=SEED, max_iter=1000),
@@ -62,7 +60,7 @@ def main():
         "random-forest": RandomForestClassifier(random_state=SEED, n_estimators=100, max_depth=6),
     }
     results = {"dataset": {"source": "synthetic", "size": len(records), "seed": SEED,
-                           "target": target, "positive_rate": sum(y) / len(y)}}
+                           "target": target, "positive_rate": float(sum(y) / len(y))}}
     OUT.mkdir(exist_ok=True)
     for name, estimator in candidates.items():
         model = Pipeline([("preprocess", preprocessor), ("model", estimator)])
@@ -72,10 +70,10 @@ def main():
         probabilities = model.predict_proba(x_test)[:, 1]
         predictions = (probabilities >= 0.5).astype(int)
         results[name] = {
-            "precision": precision_score(y_test, predictions, zero_division=0),
-            "recall": recall_score(y_test, predictions, zero_division=0),
-            "f1": f1_score(y_test, predictions, zero_division=0),
-            "pr_auc": average_precision_score(y_test, probabilities),
+            "precision": round(float(precision_score(y_test, predictions, zero_division=0)), 4),
+            "recall": round(float(recall_score(y_test, predictions, zero_division=0)), 4),
+            "f1": round(float(f1_score(y_test, predictions, zero_division=0)), 4),
+            "pr_auc": round(float(average_precision_score(y_test, probabilities)), 4),
             "confusion_matrix": confusion_matrix(y_test, predictions).tolist(),
             "training_ms": train_ms,
         }

@@ -53,6 +53,25 @@ Returns `{ "status": "ok", "timestamp": "...", "database": "connected" }`.
 }
 ```
 
+### Land boards
+
+`GET /land-boards`
+
+Returns the Botswana land boards available for a citizen application:
+
+```json
+{
+  "land_boards": [
+    {
+      "land_board_id": "<uuid>",
+      "name": "Ngwato Land Board",
+      "district": "Central District",
+      "region": "Serowe"
+    }
+  ]
+}
+```
+
 ### View application
 
 `GET /applications/:id` with the owning citizen JWT.
@@ -70,6 +89,19 @@ Returns `{ "status": "ok", "timestamp": "...", "database": "connected" }`.
 `GET /officer/applications?page=1&limit=20&status=all&sortBy=submitted_at&sortOrder=desc`
 
 The response includes `citizen_name`, `reference_number`, `application_type`, `current_status`, and `submitted_at`.
+
+### Update application status
+
+`POST /officer/applications/:id/status` with an officer JWT.
+
+```json
+{
+  "status": "under_review",
+  "notes": "Documents received and ready for review"
+}
+```
+
+Allowed statuses are `submitted`, `under_review`, `approved`, and `rejected`. Every update is recorded in `application_event`.
 
 ### Officer analytics
 

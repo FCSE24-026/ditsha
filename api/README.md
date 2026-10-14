@@ -6,7 +6,9 @@ Ditsha API
   - `POST /api/auth/officer/login`
   - `POST /api/applications` (JWT required)
   - `GET /api/applications/:id` (JWT required)
+  - `GET /api/land-boards`
   - `GET /api/officer/applications` (officer JWT required; supports `page`, `limit`, and `status`)
+  - `POST /api/officer/applications/:id/status` (officer JWT required)
   - `GET /api/officer/analytics/dashboard` (officer JWT required)
   - `GET /api/health`
 
@@ -15,12 +17,12 @@ Ditsha API
   ```powershell
   npm install
   node migrate.js
-  node seed.js
+  node seed.js --reset
   npm test
   npm run dev
   ```
 
-  The seed creates deterministic QA accounts:
+  The reset seed creates Botswana land boards, Tswana names, Botswana phone numbers, and deterministic QA accounts:
 
   - Officer: `officer@example.com` / `OfficerPass123!`
   - Citizen: `citizen@example.com` / `CitizenPass123!`

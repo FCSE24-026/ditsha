@@ -68,6 +68,12 @@ function Dashboard({ session, onLogout }) {
   const [sortOrder, setSortOrder] = useState('desc')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [updatingId, setUpdatingId] = useState(null)
+  const [selectedId, setSelectedId] = useState(null)
+  const [details, setDetails] = useState(null)
+  const [detailsLoading, setDetailsLoading] = useState(false)
+  const [note, setNote] = useState('')
+  const [assistanceLoading, setAssistanceLoading] = useState(false)
 
   useEffect(() => {
     const headers = { Authorization: `Bearer ${session.token}` }
@@ -80,6 +86,88 @@ function Dashboard({ session, onLogout }) {
       setError('')
     }).catch((requestError) => setError(requestError.message)).finally(() => setLoading(false))
   }, [session.token, status, sortBy, sortOrder])
+
+  async function loadDetails(applicationId) {
+    setSelectedId(applicationId)
+    setDetailsLoading(true)
+    setError('')
+    try {
+      const result = await apiRequest(`/officer/applications/${applicationId}`, {
+        headers: { Authorization: `Bearer ${session.token}` },
+      })
+      setDetails(result)
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setDetailsLoading(false)
+    }
+  }
+
+  async function updateStatus(applicationId, nextStatus, notes = '') {
+    setUpdatingId(applicationId)
+    setError('')
+    try {
+      await apiRequest(`/officer/applications/${applicationId}/status`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.token}` },
+        body: JSON.stringify({ status: nextStatus, notes }),
+      })
+      const refreshed = await apiRequest(`/officer/applications?page=1&limit=50&status=${status}&sortBy=${sortBy}&sortOrder=${sortOrder}`, {
+        headers: { Authorization: `Bearer ${session.token}` },
+      })
+      setApplications(refreshed.applications || [])
+      if (selectedId === applicationId) await loadDetails(applicationId)
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setUpdatingId(null)
+    }
+
+    async function decide(application) {
+      const notes = application.current_status === 'under_review' && application.nextStatus === 'rejected'
+        ? window.prompt('Enter the rejection reason (at least 5 characters):', '')
+        : ''
+      if (application.nextStatus === 'rejected' && notes === null) return
+      if (application.nextStatus === 'rejected' && notes.trim().length < 5) {
+        setError('A rejection reason of at least 5 characters is required')
+        return
+      }
+      await updateStatus(application.application_id, application.nextStatus, notes)
+    }
+
+    async function requestAssistance() {
+      if (!selectedId) return
+      setAssistanceLoading(true)
+      setError('')
+      try {
+        const result = await apiRequest(`/officer/applications/${selectedId}/assistance`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${session.token}` },
+        })
+        setDetails((current) => ({ ...current, prediction: result.prediction }))
+      } catch (requestError) {
+        setError(requestError.message)
+      } finally {
+        setAssistanceLoading(false)
+      }
+    }
+
+    async function addNote(event) {
+      event.preventDefault()
+      if (!note.trim() || !selectedId) return
+      try {
+        const result = await apiRequest(`/officer/applications/${selectedId}/notes`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${session.token}` },
+          body: JSON.stringify({ body: note }),
+        })
+        setDetails((current) => ({ ...current, notes: [result.note, ...(current.notes || [])] }))
+        setNote('')
+      } catch (requestError) {
+        setError(requestError.message)
+      }
+    }
+  }
 
   function toggleSort(nextSort) {
     setLoading(true)
@@ -94,8 +182,18 @@ function Dashboard({ session, onLogout }) {
       {error && <div className="alert">{error}</div>}
       <section className="stats-grid"><Stat label="Assigned applications" value={analytics?.total_applications} accent="accent-teal" /><Stat label="Avg. processing time" value={analytics?.avg_processing_days ? `${analytics.avg_processing_days} days` : '—'} /><Stat label="Approved" value={analytics?.applications_by_status?.approved} accent="accent-green" /><Stat label="Needs review" value={analytics?.applications_by_status?.under_review} accent="accent-amber" /></section>
       <section className="queue-panel"><div className="panel-heading"><div><h2>Assigned cases</h2><p className="muted">Prioritise the oldest submissions first.</p></div><select value={status} onChange={(event) => { setLoading(true); setStatus(event.target.value) }}><option value="all">All statuses</option><option value="submitted">Submitted</option><option value="under_review">Under review</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select></div>
-        {loading ? <div className="empty-state">Loading queue...</div> : applications.length === 0 ? <div className="empty-state">No applications match this filter.</div> : <div className="table-wrap"><table><thead><tr><th><button className="sort-button" onClick={() => toggleSort('reference_number')}>Reference {sortBy === 'reference_number' ? (sortOrder === 'asc' ? '↑' : '↓') : ''}</button></th><th>Citizen name</th><th>Application type</th><th><button className="sort-button" onClick={() => toggleSort('current_status')}>Status {sortBy === 'current_status' ? (sortOrder === 'asc' ? '↑' : '↓') : ''}</button></th><th><button className="sort-button" onClick={() => toggleSort('submitted_at')}>Submitted {sortBy === 'submitted_at' ? (sortOrder === 'asc' ? '↑' : '↓') : ''}</button></th></tr></thead><tbody>{applications.map((application) => <tr key={application.application_id}><td className="reference">{application.reference_number}</td><td>{application.citizen_name || '—'}</td><td>{application.application_type?.replaceAll('_', ' ')}</td><td><span className={`status status-${application.current_status}`}>{application.current_status?.replaceAll('_', ' ')}</span></td><td>{new Date(application.submitted_at).toLocaleDateString()}</td></tr>)}</tbody></table></div>}
+        {loading ? <div className="empty-state">Loading queue...</div> : applications.length === 0 ? <div className="empty-state">No applications match this filter.</div> : <div className="table-wrap"><table><thead><tr><th><button className="sort-button" onClick={() => toggleSort('reference_number')}>Reference {sortBy === 'reference_number' ? (sortOrder === 'asc' ? '↑' : '↓') : ''}</button></th><th>Citizen name</th><th>Application type</th><th><button className="sort-button" onClick={() => toggleSort('current_status')}>Status {sortBy === 'current_status' ? (sortOrder === 'asc' ? '↑' : '↓') : ''}</button></th><th><button className="sort-button" onClick={() => toggleSort('submitted_at')}>Submitted {sortBy === 'submitted_at' ? (sortOrder === 'asc' ? '↑' : '↓') : ''}</button></th><th>Actions</th></tr></thead><tbody>{applications.map((application) => <tr key={application.application_id}><td className="reference"><button className="link-button" onClick={() => loadDetails(application.application_id)}>{application.reference_number}</button></td><td>{application.citizen_name || '—'}</td><td>{application.application_type?.replaceAll('_', ' ')}</td><td><span className={`status status-${application.current_status}`}>{application.current_status?.replaceAll('_', ' ')}</span></td><td>{new Date(application.submitted_at).toLocaleDateString()}</td><td className="actions">{application.current_status === 'submitted' && <button className="quiet-button" disabled={updatingId === application.application_id} onClick={() => updateStatus(application.application_id, 'under_review')}>Review</button>}{application.current_status === 'under_review' && <><button className="quiet-button" disabled={updatingId === application.application_id} onClick={() => updateStatus(application.application_id, 'approved')}>Approve</button><button className="quiet-button" disabled={updatingId === application.application_id} onClick={() => decide({ ...application, nextStatus: 'rejected' })}>Reject</button></>}</td></tr>)}</tbody></table></div>}
       </section>
+      {selectedId && <aside className="details-panel">
+        <div className="panel-heading"><div><p className="eyebrow">Case review</p><h2>{details?.application?.reference_number || 'Application details'}</h2></div><button className="quiet-button" onClick={() => { setSelectedId(null); setDetails(null) }}>Close</button></div>
+        {detailsLoading ? <div className="empty-state">Loading application...</div> : details && <div className="details-content">
+          <div className="detail-grid"><div><strong>Applicant</strong><span>{details.application.citizen_name}</span><span>{details.application.citizen_email || details.application.citizen_phone || 'No contact recorded'}</span></div><div><strong>Status</strong><span className={`status status-${details.application.current_status}`}>{details.application.current_status.replaceAll('_', ' ')}</span></div><div><strong>Type</strong><span>{details.application.application_type?.replaceAll('_', ' ')}</span></div><div><strong>Description</strong><span>{details.application.description || 'No description provided'}</span></div></div>
+          <section><div className="section-heading"><h3>Documents</h3><span>{details.documents.length} uploaded</span></div>{details.documents.length ? <ul className="plain-list">{details.documents.map((document) => <li key={document.document_id}>{document.original_name}<small>{document.scan_status}</small></li>)}</ul> : <p className="muted">No documents uploaded.</p>}</section>
+          <section><div className="section-heading"><h3>ML assistance</h3><button className="quiet-button" disabled={assistanceLoading} onClick={requestAssistance}>{assistanceLoading ? 'Checking...' : 'Run check'}</button></div>{details.prediction ? <div className="prediction"><strong>{details.prediction.category}</strong><span>Score: {details.prediction.score ?? '—'} · {details.prediction.model_version}</span><ul className="plain-list">{(details.prediction.reasons || []).map((reason, index) => <li key={index}>{reason}</li>)}</ul></div> : <p className="muted">Advisory only; an officer always makes the decision.</p>}</section>
+          <section><div className="section-heading"><h3>Internal notes</h3></div><form className="note-form" onSubmit={addNote}><textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="Record a review note..." rows="3" /><button className="primary-button" type="submit">Add note</button></form>{details.notes.length ? <ul className="plain-list">{details.notes.map((item) => <li key={item.note_id}>{item.body}<small>{new Date(item.created_at).toLocaleString()}</small></li>)}</ul> : <p className="muted">No notes yet.</p>}</section>
+          <section><div className="section-heading"><h3>Timeline</h3></div><ul className="plain-list">{details.events.map((event, index) => <li key={`${event.event_timestamp}-${index}`}><strong>{event.event_type.replaceAll('_', ' ')}</strong> {event.notes || ''}<small>{new Date(event.event_timestamp).toLocaleString()}</small></li>)}</ul></section>
+        </div>}
+      </aside>}
     </section>
   </main>
 }

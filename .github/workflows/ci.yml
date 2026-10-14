@@ -1,0 +1,72 @@
+name: Ditsha CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ditsha
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ditsha"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/ditsha
+      JWT_SECRET: ci-only-secret-that-is-long-enough-123456
+      NODE_ENV: test
+      CORS_ORIGINS: http://localhost:5173
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - run: npm ci
+        working-directory: api
+      - run: node migrate.js
+        working-directory: api
+      - run: node seed.js
+        working-directory: api
+      - run: npm test
+        working-directory: api
+
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ditsha-frontend/package-lock.json
+      - run: npm ci
+        working-directory: ditsha-frontend
+      - run: npm run build
+        working-directory: ditsha-frontend
+
+  citizen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+        working-directory: ditsha-flutter
+      - run: flutter analyze
+        working-directory: ditsha-flutter
+      - run: flutter test
+        working-directory: ditsha-flutter

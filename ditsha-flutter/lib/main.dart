@@ -179,15 +179,57 @@ class _HomePageState extends State<HomePage> {
   final landBoardId = TextEditingController();
   final applicationId = TextEditingController();
   String applicationType = 'residential_allocation';
+  List<Map<String, dynamic>> landBoards = [];
+  String? selectedLandBoardId;
   Map<String, dynamic>? application;
+  List<Map<String, dynamic>> applications = [];
+  List<Map<String, dynamic>> notifications = [];
   bool busy = false;
   String? message;
   String? error;
 
+  @override
+  void initState() {
+    super.initState();
+    loadLandBoards();
+    loadCitizenData();
+  }
+
+  Future<void> loadCitizenData() async {
+    try {
+      final results = await Future.wait([
+        widget.api.request('/applications'),
+        widget.api.request('/notifications'),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        applications = List<Map<String, dynamic>>.from(results[0]['applications'] ?? const []);
+        notifications = List<Map<String, dynamic>>.from(results[1]['notifications'] ?? const []);
+      });
+    } catch (exception) {
+      if (mounted) setState(() => error = exception.toString().replaceFirst('Exception: ', ''));
+    }
+  }
+
+  Future<void> loadLandBoards() async {
+    try {
+      final response = await widget.api.request('/land-boards');
+      if (!mounted) return;
+      setState(() {
+        landBoards = List<Map<String, dynamic>>.from(response['land_boards'] ?? const []);
+        selectedLandBoardId = landBoards.isNotEmpty ? landBoards.first['land_board_id'] as String : null;
+      });
+    } catch (exception) {
+      if (mounted) setState(() => error = exception.toString().replaceFirst('Exception: ', ''));
+    }
+  }
+
   Future<void> submitApplication() async {
     await runRequest(() async {
-      final response = await widget.api.request('/applications', method: 'POST', body: {'application_type': applicationType, 'land_board_id': landBoardId.text, 'description': description.text});
-      setState(() { application = response; message = 'Application submitted successfully.'; });
+      if (selectedLandBoardId == null) throw Exception('Select a land board');
+      final response = await widget.api.request('/applications', method: 'POST', body: {'application_type': applicationType, 'land_board_id': selectedLandBoardId, 'description': description.text});
+      setState(() { application = response; applications = [response, ...applications]; message = 'Application submitted successfully.'; });
+      await loadCitizenData();
     });
   }
 
@@ -210,13 +252,15 @@ class _HomePageState extends State<HomePage> {
       const SizedBox(height: 6),
       Text('Submit a land application or check an existing case.', style: TextStyle(color: Colors.grey.shade600)),
       const SizedBox(height: 24),
-      Card(child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('New application', style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold)), const SizedBox(height: 14), DropdownButtonFormField<String>(initialValue: applicationType, decoration: const InputDecoration(labelText: 'Application type', border: OutlineInputBorder()), items: const [DropdownMenuItem(value: 'residential_allocation', child: Text('Residential allocation')), DropdownMenuItem(value: 'land_transfer', child: Text('Land transfer')), DropdownMenuItem(value: 'lease_renewal', child: Text('Lease renewal')), DropdownMenuItem(value: 'change_of_use', child: Text('Change of use'))], onChanged: busy ? null : (value) { if (value != null) setState(() => applicationType = value); }), const SizedBox(height: 12), TextField(controller: description, maxLines: 3, decoration: const InputDecoration(labelText: 'Description', hintText: 'Describe your application', border: OutlineInputBorder())), const SizedBox(height: 12), TextField(controller: landBoardId, decoration: const InputDecoration(labelText: 'Land board ID', hintText: 'Paste a land board UUID', border: OutlineInputBorder())), const SizedBox(height: 14), SizedBox(width: double.infinity, child: FilledButton(onPressed: busy ? null : submitApplication, child: const Text('Submit application')))]))),
+      Card(child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('New application', style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold)), const SizedBox(height: 14), DropdownButtonFormField<String>(initialValue: applicationType, decoration: const InputDecoration(labelText: 'Application type', border: OutlineInputBorder()), items: const [DropdownMenuItem(value: 'residential_allocation', child: Text('Residential allocation')), DropdownMenuItem(value: 'land_transfer', child: Text('Land transfer')), DropdownMenuItem(value: 'lease_renewal', child: Text('Lease renewal')), DropdownMenuItem(value: 'change_of_use', child: Text('Change of use'))], onChanged: busy ? null : (value) { if (value != null) setState(() => applicationType = value); }), const SizedBox(height: 12), DropdownButtonFormField<String>(initialValue: selectedLandBoardId, decoration: const InputDecoration(labelText: 'Land board', border: OutlineInputBorder()), items: landBoards.map((board) => DropdownMenuItem<String>(value: board['land_board_id'] as String, child: Text('${board['name']} (${board['region']})'))).toList(), onChanged: busy ? null : (value) => setState(() => selectedLandBoardId = value)), const SizedBox(height: 12), TextField(controller: description, maxLines: 3, decoration: const InputDecoration(labelText: 'Description', hintText: 'Describe your application', border: OutlineInputBorder())), const SizedBox(height: 14), SizedBox(width: double.infinity, child: FilledButton(onPressed: busy || landBoards.isEmpty ? null : submitApplication, child: const Text('Submit application')))]))),
       const SizedBox(height: 14),
       Card(child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Check application status', style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold)), const SizedBox(height: 14), TextField(controller: applicationId, decoration: const InputDecoration(labelText: 'Application ID', border: OutlineInputBorder())), const SizedBox(height: 14), SizedBox(width: double.infinity, child: OutlinedButton(onPressed: busy ? null : lookupApplication, child: const Text('View status')))]))),
       if (busy) const Padding(padding: EdgeInsets.only(top: 18), child: Center(child: CircularProgressIndicator())),
       if (error != null) Padding(padding: const EdgeInsets.only(top: 18), child: Text(error!, style: const TextStyle(color: Colors.red))),
       if (message != null) Padding(padding: const EdgeInsets.only(top: 18), child: Text(message!, style: const TextStyle(color: Color(0xff176c65), fontWeight: FontWeight.bold))),
       if (application != null) Card(margin: const EdgeInsets.only(top: 18), color: const Color(0xffe2f1e3), child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Application details', style: TextStyle(fontWeight: FontWeight.bold)), const SizedBox(height: 10), Text('Reference: ${application!['reference_number'] ?? '—'}'), Text('Status: ${application!['status'] ?? '—'}'), Text('Stage: ${application!['current_stage'] ?? '—'}')]))),
+      if (applications.isNotEmpty) Card(margin: const EdgeInsets.only(top: 18), child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('My applications', style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold)), const SizedBox(height: 8), ...applications.take(5).map((item) => ListTile(contentPadding: EdgeInsets.zero, title: Text(item['reference_number']?.toString() ?? 'Application'), subtitle: Text('${item['application_type'] ?? ''} · ${item['status'] ?? item['current_status'] ?? ''}'), trailing: Text(item['current_stage']?.toString() ?? '')))]))),
+      if (notifications.isNotEmpty) Card(margin: const EdgeInsets.only(top: 18), child: Padding(padding: const EdgeInsets.all(18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Notifications', style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold)), const SizedBox(height: 8), ...notifications.take(5).map((item) => ListTile(contentPadding: EdgeInsets.zero, title: Text(item['title']?.toString() ?? 'Notification'), subtitle: Text(item['body']?.toString() ?? '')))]))),
     ]));
   }
 }

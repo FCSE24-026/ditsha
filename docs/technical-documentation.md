@@ -29,6 +29,12 @@ The schema contains:
 - `officer`
 - `application`
 - `application_event`
+- `application_document`
+- `application_note`
+- `notification`
+- `application_assignment`
+- `ml_prediction`
+- `password_reset_token`
 
 Local database settings are stored in `api/.env` and are intentionally excluded from source control. The current local connection is PostgreSQL on `localhost:5432`, database `ditsha`.
 
@@ -43,7 +49,7 @@ The migration script loads `.env` relative to the API directory, so it works eve
 
 ## 4. Synthetic Data and QA Accounts
 
-The Node seed script creates land boards, officers, citizens, and 1000 application records. It constrains generated phone values to the database limit and offsets application reference numbers when rerun.
+The reset seed script creates Botswana land boards, Tswana names, Botswana phone numbers, 301 officers, 4418 citizens, 7000 applications, and an initial audit event for every demonstration application. It is deterministic in shape and replaces the existing local dataset when run with `--reset`.
 
 The deterministic QA accounts are:
 
@@ -56,8 +62,10 @@ Seed:
 
 ```powershell
 cd api
-node seed.js
+node seed.js --reset
 ```
+
+The Python generator in `data-gen/` also uses Botswana land boards and Tswana names. It is intended for adding a separate CSV-backed demonstration batch, while the Node reset seed is the source of truth for a clean local database.
 
 ## 5. Backend API
 
@@ -72,15 +80,30 @@ Public endpoints:
 
 Citizen endpoints:
 
+- `GET /api/land-boards`
 - `POST /api/applications`
+- `GET /api/applications`
 - `GET /api/applications/:id`
+- `POST /api/applications/:id/documents`
+- `GET /api/applications/:id/documents/:documentId`
+- `GET /api/notifications`
+- `POST /api/notifications/:id/read`
+- `POST /api/auth/citizen/password-reset/request`
+- `POST /api/auth/citizen/password-reset/complete`
 
 Officer endpoints:
 
 - `GET /api/officer/applications?page=1&limit=20&status=all`
+- `POST /api/officer/applications/:id/status`
+- `GET /api/officer/applications/:id`
+- `POST /api/officer/applications/:id/assistance`
+- `POST /api/officer/applications/:id/notes`
 - `GET /api/officer/analytics/dashboard`
 
 JWT role claims distinguish citizens from officers. Citizen application reads are scoped to the authenticated citizen. Officer queue and analytics results are scoped to the authenticated officer.
+
+Status transitions are constrained server-side: `submitted -> under_review`, followed by
+`under_review -> approved|rejected`. Rejection requires an explanatory note.
 
 Start the API:
 
@@ -108,6 +131,9 @@ Current protections include:
 - Request validation for required authentication and application fields.
 - Pagination bounds on officer queue requests.
 - Express `x-powered-by` header disabled.
+- Private document storage outside public web roots, with authenticated ownership/assignment checks.
+- Password reset tokens are hashed in PostgreSQL, expire after 15 minutes, and are single-use.
+- ML assistance is advisory and unavailable responses are surfaced as a controlled error.
 
 Run tests:
 
@@ -131,6 +157,8 @@ Implemented features:
 - Analytics cards.
 - Sign out.
 - Loading and error states.
+- Application detail panel with applicant data, documents, timeline, notes, and advisory ML assistance.
+- Rejection reason prompt and server-side legal transition enforcement.
 - Responsive desktop and tablet styling.
 
 Start it:
@@ -157,6 +185,8 @@ Implemented flows:
 - Application status lookup.
 - Logout.
 - API error and loading states.
+- Application history and persistent notification retrieval.
+- Land-board selection from the API rather than manual UUID entry.
 
 API defaults:
 
@@ -212,12 +242,13 @@ node index.js
 
 ## 11. Known Follow-ups
 
-- Add a land-board listing endpoint for clients.
-- Add full database-backed integration tests for login, submission, officer queue, and analytics.
+- Add complete multipart document and password-reset integration coverage.
 - Add Flutter widget and integration tests.
 - Add CI to run backend tests and frontend build on pull requests.
 - Replace permissive development CORS with an explicit production allowlist.
 - Add production secret rotation and backup procedures.
+- Configure an approved malware scanner before production document acceptance.
+- Build and deploy the ML image in an environment with reliable PyPI access.
 
 ## 12. Change Log
 
@@ -228,3 +259,20 @@ node index.js
 - 2026-10-01: Completed database migration, seeding, backend health verification, and officer dashboard integration.
 - 2026-10-01: Implemented Flutter citizen registration, login, application submission, and status lookup.
 - 2026-10-03: Flutter SDK installed; analysis passed and citizen login widget smoke test passed.
+- 2026-10-03: Added persisted workflow records, private documents, notifications, password reset, advisory ML assistance, constrained decisions, and officer case review UI.
+## Current implementation traceability
+
+| Requirement | Implementation | Verification | Status | Limitation |
+|---|---|---|---|---|
+| Citizen application submission | `api/routes/applications.js`, `ditsha-flutter/lib/main.dart` | `api` Jest suite, Flutter analysis/tests | verified | Document scanning is unavailable in local development |
+| Officer status decisions | `api/routes/applications.js`, `ditsha-frontend/src/App.jsx` | API decision test and dashboard build | verified | Assignment administration is not yet exposed in the UI |
+| Officer case review | `api/routes/applications.js`, `ditsha-frontend/src/App.jsx` | Backend suite and dashboard build | verified | Document downloads are authenticated but not previewed inline |
+| Persistent password reset | `api/routes/auth.js`, `db/migrations/002_password_reset_tokens.sql` | Migration and API syntax checks | verified | Delivery of reset links still needs an external mail provider |
+| Advisory ML assistance | `ml-service/main.py`, `api/routes/applications.js` | Python syntax check and controlled API fallback | partial | Only synthetic evaluation data is available; no production accuracy claim |
+| Citizen history and notifications | `notification` and application history endpoints, Flutter home view | API notification/privacy tests | verified | Email/SMS delivery is not included |
+| Private document storage | `application_document`, multipart upload/download routes | API route implementation; integration upload test pending | partial | Local private disk storage; malware scanner integration is pending |
+| ML assistance | `ml-service/main.py`, `ml-service/train_compare.py` | Python syntax check; container build depends on package download | partial | Synthetic evaluation is not evidence of production performance |
+| Object-level authorization | Citizen ownership filters and officer assignment filters | Cross-citizen IDOR regression test | verified | Full role/permission administration is pending |
+
+The deterministic ML result is advisory only. Backend status transitions remain
+the source of truth and require an authorized officer.

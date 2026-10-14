@@ -77,5 +77,54 @@ describe('API request validation', () => {
     expect(submission.statusCode).toBe(200);
     expect(submission.body.reference_number).toMatch(/^APP-/);
     expect(submission.body.status).toBe('submitted');
+    const applications = await request(app)
+      .get('/api/applications')
+      .set('Authorization', 'Bearer ' + login.body.token);
+    expect(applications.statusCode).toBe(200);
+    expect(applications.body.applications.length).toBeGreaterThan(0);
+    const notifications = await request(app)
+      .get('/api/notifications')
+      .set('Authorization', 'Bearer ' + login.body.token);
+    expect(notifications.statusCode).toBe(200);
+    expect(notifications.body.notifications.length).toBeGreaterThan(0);
+  }, 15000);
+
+  it('prevents a citizen from reading another citizen application', async () => {
+    const login = await request(app)
+      .post('/api/auth/citizen/login')
+      .send({ email: 'citizen@example.com', password: 'CitizenPass123!' });
+    const other = await db.query(
+      'SELECT application_id FROM application WHERE citizen_id <> $1 LIMIT 1',
+      [login.body.citizen_id],
+    );
+    expect(other.rowCount).toBeGreaterThan(0);
+    const response = await request(app)
+      .get(`/api/applications/${other.rows[0].application_id}`)
+      .set('Authorization', 'Bearer ' + login.body.token);
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('lists Botswana land boards and records an officer decision event', async () => {
+    const officerLogin = await request(app)
+      .post('/api/auth/officer/login')
+      .send({ email: 'officer@example.com', password: 'OfficerPass123!' });
+    const officerHeaders = { Authorization: `Bearer ${officerLogin.body.token}` };
+
+    const boards = await request(app).get('/api/land-boards');
+    expect(boards.statusCode).toBe(200);
+    expect(boards.body.land_boards.some((board) => board.name === 'Ngwato Land Board')).toBe(true);
+
+    const queue = await request(app)
+      .get('/api/officer/applications?limit=1&status=submitted')
+      .set(officerHeaders);
+    expect(queue.statusCode).toBe(200);
+    expect(queue.body.applications.length).toBeGreaterThan(0);
+
+    const decision = await request(app)
+      .post(`/api/officer/applications/${queue.body.applications[0].application_id}/status`)
+      .set(officerHeaders)
+      .send({ status: 'under_review', notes: 'Documents received for review' });
+    expect(decision.statusCode).toBe(200);
+    expect(decision.body.status).toBe('under_review');
   }, 15000);
 });

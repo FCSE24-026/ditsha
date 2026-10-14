@@ -1,0 +1,6 @@
+node_modules
+.env
+.env.*
+private-documents
+tests
+*.log

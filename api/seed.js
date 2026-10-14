@@ -1,86 +1,160 @@
 'use strict';
-const faker = require('faker');
-const db = require('./db');
-const { v4: uuidv4 } = require('uuid');
+
 const bcrypt = require('bcryptjs');
+const { randomUUID } = require('crypto');
+const db = require('./db');
+
+const LAND_BOARDS = [
+  ['Ngwato Land Board', 'Central District', 'Serowe'],
+  ['Kgatleng Land Board', 'Kgatleng District', 'Mochudi'],
+  ['Kweneng Land Board', 'Kweneng District', 'Molepolole'],
+  ['Ngwaketse Land Board', 'Southern District', 'Kanye'],
+  ['Tlokweng Land Board', 'South East District', 'Tlokweng'],
+  ['Tawana Land Board', 'North West District', 'Maun'],
+  ['Tati Land Board', 'North East District', 'Masunga'],
+  ['Ghanzi Land Board', 'Ghanzi District', 'Ghanzi'],
+  ['Chobe Land Board', 'Chobe District', 'Kasane'],
+  ['Kgalagadi Land Board', 'Kgalagadi District', 'Tsabong'],
+  ['Rolong Land Board', 'Lobatse Town', 'Lobatse'],
+  ['Malete Land Board', 'Goodhope Sub-District', 'Ramotswa'],
+];
+
+const FIRST_NAMES = [
+  'Boitumelo', 'Dineo', 'Kagiso', 'Kabelo', 'Kefilwe', 'Kealeboga',
+  'Lesego', 'Lorato', 'Masego', 'Mpho', 'Neo', 'Olebogeng',
+  'Onalenna', 'Phenyo', 'Tshepo', 'Tumelo', 'Tlotlo', 'Thato',
+];
+
+const LAST_NAMES = [
+  'Molefe', 'Mogomotsi', 'Motsamai', 'Motswana', 'Mothibi', 'Moagi',
+  'Mokgosi', 'Mosepele', 'Motswetla', 'Molebatsi', 'Rantao', 'Tshwene',
+  'Sebego', 'Segokgo', 'Setlhare', 'Tshosa', 'Kgosi', 'Gasebalwe',
+];
+
+const APPLICATION_TYPES = ['residential_allocation', 'land_transfer', 'lease_renewal', 'change_of_use'];
+const STATUSES = ['submitted', 'under_review', 'approved', 'rejected'];
+const STAGES = ['initial_review', 'documentation_review', 'field_inspection', 'final_decision'];
+const OFFICER_ROLES = ['clerk', 'inspector', 'manager'];
+
+function nameAt(index) {
+  return `${FIRST_NAMES[index % FIRST_NAMES.length]} ${LAST_NAMES[Math.floor(index / FIRST_NAMES.length) % LAST_NAMES.length]}`;
+}
+
+function emailFor(name, index, domain) {
+  return `${name.toLowerCase().replaceAll(' ', '.')}.${index}@${domain}`;
+}
 
 async function insertMany() {
+  const shouldReset = process.argv.includes('--reset');
+  const client = await db.pool.connect();
+
   try {
-    // create a deterministic land board, officer, and citizen for testing
-    const testLandBoardId = uuidv4();
-    await db.query('INSERT INTO land_board (land_board_id,name,district,region) VALUES ($1,$2,$3,$4)', [testLandBoardId, 'Test LandBoard', 'Gaborone', 'South']);
-    const testOfficerId = uuidv4();
-    const testOfficerPassword = 'OfficerPass123!';
-    const testOfficerHash = await bcrypt.hash(testOfficerPassword, 10);
-    const testOfficerEmail = 'officer@example.com';
-    const existingOfficer = await db.query('SELECT officer_id FROM officer WHERE email = $1', [testOfficerEmail]);
-    if (existingOfficer.rowCount === 0) {
-      await db.query('INSERT INTO officer (officer_id,land_board_id,full_name,email,role,password_hash) VALUES ($1,$2,$3,$4,$5,$6)', [testOfficerId, testLandBoardId, 'Test Officer', testOfficerEmail, 'manager', testOfficerHash]);
-    }
-    const seededOfficerId = existingOfficer.rowCount > 0 ? existingOfficer.rows[0].officer_id : testOfficerId;
-
-    const testCitizenId = uuidv4();
-    const testCitizenPassword = 'CitizenPass123!';
-    const testCitizenHash = await bcrypt.hash(testCitizenPassword, 10);
-    const testCitizenEmail = 'citizen@example.com';
-    const existingCitizen = await db.query('SELECT citizen_id FROM citizen WHERE email = $1', [testCitizenEmail]);
-    if (existingCitizen.rowCount === 0) {
-      await db.query('INSERT INTO citizen (citizen_id,national_id,full_name,phone,email,district,password_hash) VALUES ($1,$2,$3,$4,$5,$6,$7)', [testCitizenId, 'BWTEST00001', 'Test Citizen', '+26770000000', testCitizenEmail, 'Gaborone', testCitizenHash]);
+    await client.query('BEGIN');
+    if (shouldReset) {
+      await client.query('TRUNCATE application_event, application, officer, citizen, land_board CASCADE');
     }
 
-    console.log('Test accounts: officer ->', testOfficerEmail, '/', testOfficerPassword, '  citizen ->', testCitizenEmail, '/', testCitizenPassword);
-
-    // land boards
-    const landBoards = [];
-    for (let i = 0; i < 10; i++) {
-      const id = uuidv4();
-      landBoards.push(id);
-      await db.query('INSERT INTO land_board (land_board_id,name,district,region) VALUES ($1,$2,$3,$4)', [id, faker.company.companyName(), faker.address.city(), faker.address.state()]);
+    const boardIds = [];
+    for (const [name, district, region] of LAND_BOARDS) {
+      const id = randomUUID();
+      boardIds.push(id);
+      await client.query(
+        'INSERT INTO land_board (land_board_id,name,district,region) VALUES ($1,$2,$3,$4)',
+        [id, name, district, region],
+      );
     }
 
-    // officers
-    const officers = [];
-    for (let i = 0; i < 30; i++) {
-      const id = uuidv4();
-      officers.push(id);
-      const password = 'OfficerPass123!';
-      const password_hash = await bcrypt.hash(password, 10);
-      await db.query('INSERT INTO officer (officer_id,land_board_id,full_name,email,role,password_hash) VALUES ($1,$2,$3,$4,$5,$6)', [id, landBoards[Math.floor(Math.random()*landBoards.length)], faker.name.findName(), faker.internet.email(), ['clerk','inspector','manager'][Math.floor(Math.random()*3)], password_hash]);
+    const officerPasswordHash = await bcrypt.hash('OfficerPass123!', 10);
+    const citizenPasswordHash = await bcrypt.hash('CitizenPass123!', 10);
+    const testOfficerId = randomUUID();
+    const testCitizenId = randomUUID();
+
+    await client.query(
+      'INSERT INTO officer (officer_id,land_board_id,full_name,email,role,password_hash) VALUES ($1,$2,$3,$4,$5,$6)',
+      [testOfficerId, boardIds[0], 'Kagiso Molefe', 'officer@example.com', 'manager', officerPasswordHash],
+    );
+    await client.query(
+      'INSERT INTO citizen (citizen_id,national_id,full_name,phone,email,district,password_hash) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+      [testCitizenId, 'BWTEST00001', 'Masego Molefe', '+267 71 000 001', 'citizen@example.com', 'Serowe', citizenPasswordHash],
+    );
+
+    const officerIds = [testOfficerId];
+    for (let i = 0; i < 300; i += 1) {
+      const id = randomUUID();
+      officerIds.push(id);
+      const name = nameAt(i + 1);
+      await client.query(
+        'INSERT INTO officer (officer_id,land_board_id,full_name,email,role,password_hash) VALUES ($1,$2,$3,$4,$5,$6)',
+        [id, boardIds[(i + 1) % boardIds.length], name, emailFor(name, i + 1, 'ditsha.gov.bw'), OFFICER_ROLES[i % OFFICER_ROLES.length], officerPasswordHash],
+      );
     }
 
-    // citizens
-    const citizens = [];
-    for (let i = 0; i < 500; i++) {
-      const id = uuidv4();
-      citizens.push(id);
-      const password = 'CitizenPass123!';
-      const password_hash = await bcrypt.hash(password, 10);
-      await db.query('INSERT INTO citizen (citizen_id,national_id,full_name,phone,email,district,password_hash) VALUES ($1,$2,$3,$4,$5,$6,$7)', [id, faker.random.alphaNumeric(9).toUpperCase(), faker.name.findName(), faker.phone.phoneNumber().slice(0, 20), faker.internet.email(), faker.address.city(), password_hash]);
+    const citizenIds = [testCitizenId];
+    for (let i = 0; i < 4417; i += 1) {
+      const id = randomUUID();
+      citizenIds.push(id);
+      const name = nameAt(i + 19);
+      await client.query(
+        'INSERT INTO citizen (citizen_id,national_id,full_name,phone,email,district,password_hash) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+        [id, `BW${String(i + 2).padStart(9, '0')}`, name, `+267 7${String((i + 2) % 10000000).padStart(7, '0')}`, emailFor(name, i + 2, 'example.co.bw'), LAND_BOARDS[i % LAND_BOARDS.length][1], citizenPasswordHash],
+      );
     }
 
-    // applications
-    const existingApplications = await db.query('SELECT count(*) FROM application');
-    const referenceOffset = Number(existingApplications.rows[0].count);
-    for (let i = 0; i < 1000; i++) {
-      const id = uuidv4();
-      const citizen = citizens[Math.floor(Math.random()*citizens.length)];
-      const landBoard = landBoards[Math.floor(Math.random()*landBoards.length)];
-      const appType = ['residential_allocation','land_transfer','lease_renewal','change_of_use'][Math.floor(Math.random()*4)];
-      const ref = `APP-${new Date().getFullYear()}-${String(i + referenceOffset).padStart(5,'0')}`;
-      const submittedAt = faker.date.between(new Date(Date.now()-1000*60*60*24*180), new Date());
-      const status = ['submitted','under_review','approved','rejected'][Math.floor(Math.random()*4)];
-      const stage = ['initial_review','documentation_review','field_inspection','final_decision'][Math.floor(Math.random()*4)];
-      const processingDays = status === 'approved' ? faker.random.arrayElement([14, 21, 35, 75]) : null;
-      const documentComplete = Math.random() > 0.25;
-      const assignedOfficer = i < 50 ? seededOfficerId : (Math.random() < 0.8 ? officers[Math.floor(Math.random()*officers.length)] : null);
-      await db.query('INSERT INTO application (application_id,citizen_id,land_board_id,application_type,description,reference_number,submitted_at,current_status,current_stage,processing_days,document_complete,assigned_officer_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)', [id,citizen,landBoard,appType,`Synthetic ${appType.replaceAll('_', ' ')} application`,ref,submittedAt,status,stage,processingDays,documentComplete,assignedOfficer]);
+    const now = Date.now();
+    for (let i = 0; i < 7000; i += 1) {
+      const applicationId = randomUUID();
+      const status = STATUSES[i % STATUSES.length];
+      const stage = STAGES[i % STAGES.length];
+      const submittedAt = new Date(now - ((i % 180) + 1) * 24 * 60 * 60 * 1000);
+      const assignedOfficerId = i < 50 ? testOfficerId : officerIds[i % officerIds.length];
+      await client.query(
+        `INSERT INTO application
+          (application_id,citizen_id,land_board_id,application_type,description,reference_number,
+           submitted_at,current_status,current_stage,processing_days,document_complete,assigned_officer_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [
+          applicationId,
+          citizenIds[i % citizenIds.length],
+          boardIds[i % boardIds.length],
+          APPLICATION_TYPES[i % APPLICATION_TYPES.length],
+          `Botswana ${APPLICATION_TYPES[i % APPLICATION_TYPES.length].replaceAll('_', ' ')} application`,
+          `APP-${new Date().getUTCFullYear()}-${String(i + 1).padStart(5, '0')}`,
+          submittedAt,
+          status,
+          stage,
+          status === 'approved' ? [14, 21, 35, 75][i % 4] : null,
+          i % 4 !== 0,
+          assignedOfficerId,
+        ],
+      );
+      await client.query(
+        `INSERT INTO application_event
+          (event_id, application_id, officer_id, event_type, from_status, to_status, stage, notes, event_timestamp)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [
+          randomUUID(),
+          applicationId,
+          assignedOfficerId,
+          'seeded_submission',
+          null,
+          status,
+          stage,
+          'Initial Botswana demonstration record',
+          submittedAt,
+        ],
+      );
     }
 
-    console.log('Seeding completed');
-    process.exit(0);
-  } catch (err) {
-    console.error('Seed error', err);
-    process.exit(1);
+    await client.query('COMMIT');
+    console.log(`Seeded ${LAND_BOARDS.length} Botswana land boards, 301 officers, 4418 citizens, and 7000 applications.`);
+    console.log('Test accounts: officer@example.com / OfficerPass123! and citizen@example.com / CitizenPass123!');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Seed error:', error);
+    process.exitCode = 1;
+  } finally {
+    client.release();
+    await db.pool.end();
   }
 }
 

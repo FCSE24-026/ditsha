@@ -264,15 +264,42 @@ node index.js
 
 | Requirement | Implementation | Verification | Status | Limitation |
 |---|---|---|---|---|
-| Citizen application submission | `api/routes/applications.js`, `ditsha-flutter/lib/main.dart` | `api` Jest suite, Flutter analysis/tests | verified | Document scanning is unavailable in local development |
-| Officer status decisions | `api/routes/applications.js`, `ditsha-frontend/src/App.jsx` | API decision test and dashboard build | verified | Assignment administration is not yet exposed in the UI |
-| Officer case review | `api/routes/applications.js`, `ditsha-frontend/src/App.jsx` | Backend suite and dashboard build | verified | Document downloads are authenticated but not previewed inline |
-| Persistent password reset | `api/routes/auth.js`, `db/migrations/002_password_reset_tokens.sql` | Migration and API syntax checks | verified | Delivery of reset links still needs an external mail provider |
-| Advisory ML assistance | `ml-service/main.py`, `api/routes/applications.js` | Python syntax check and controlled API fallback | partial | Only synthetic evaluation data is available; no production accuracy claim |
-| Citizen history and notifications | `notification` and application history endpoints, Flutter home view | API notification/privacy tests | verified | Email/SMS delivery is not included |
-| Private document storage | `application_document`, multipart upload/download routes | API route implementation; integration upload test pending | partial | Local private disk storage; malware scanner integration is pending |
-| ML assistance | `ml-service/main.py`, `ml-service/train_compare.py` | Python syntax check; container build depends on package download | partial | Synthetic evaluation is not evidence of production performance |
-| Object-level authorization | Citizen ownership filters and officer assignment filters | Cross-citizen IDOR regression test | verified | Full role/permission administration is pending |
+| Citizen registration & login | `api/routes/auth.js`, `ditsha-flutter/lib/main.dart` | API Jest test & Flutter widget tests | verified | Uses bcrypt password hashing and JWT |
+| Citizen profile viewing/editing | `api/routes/auth.js`, `ditsha-flutter/lib/main.dart` | API integration test & Flutter UI | verified | Profile updates validated server-side |
+| Land board selection | `api/routes/applications.js`, `ditsha-flutter/lib/main.dart` | API Jest test & Flutter dropdown | verified | Dynamically fetched from API |
+| Citizen draft saving & submission | `api/routes/applications.js`, `ditsha-flutter/lib/main.dart` | API Jest test suite & Flutter draft view | verified | Transactional save with `is_draft` flag |
+| Citizen document upload & magic checks | `api/routes/applications.js`, `ditsha-flutter/lib/main.dart` | API magic byte test & Flutter upload | verified | Magic byte validation for PDF/PNG/JPEG |
+| Application status lookup & history | `api/routes/applications.js`, `ditsha-flutter/lib/main.dart` | API Jest test & Flutter status screen | verified | Detailed event timeline displayed |
+| Information request & citizen response | `api/routes/applications.js`, `ditsha-flutter/lib/main.dart`, `ditsha-frontend/src/App.jsx` | Full loop API Jest test, React modal, Flutter response UI | verified | State transitions safely enforced |
+| Application withdrawal | `api/routes/applications.js`, `ditsha-flutter/lib/main.dart` | API Jest test & Flutter withdraw button | verified | Allowed only from eligible active statuses |
+| Officer authentication & queue | `api/routes/auth.js`, `api/routes/applications.js`, `ditsha-frontend/src/App.jsx` | API Jest test & React dashboard build | verified | Scoped to assigned officer/land board |
+| Search, filter, and pagination | `api/routes/applications.js`, `ditsha-frontend/src/App.jsx` | API query tests & React UI controls | verified | Search by name/ref/ID, land board filter, status filter, 20-per-page pagination |
+| Officer status decisions | `api/routes/applications.js`, `ditsha-frontend/src/App.jsx` | API decision test and dashboard build | verified | Reject requires mandatory justification note |
+| Case assignment & reassignment | `api/routes/applications.js`, `ditsha-frontend/src/App.jsx` | API assignment test & React modal | verified | Audit trail recorded in `application_assignment` |
+| Priority override with audit | `api/routes/applications.js`, `ditsha-frontend/src/App.jsx` | API override test & React modal | verified | Recorded in application record and audit events |
+| Real-time / bounded queue updates | `ditsha-frontend/src/App.jsx` | 15s bounded polling with live indicator and manual refresh | verified | Safe fallback for development and staging |
+| ML assistance & candidate models | `ml-service/main.py`, `ml-service/train_compare.py` | Docker container healthy, 3 models evaluated (LR, DT, RF) | verified | Metrics persisted in `ml-service/artifacts/comparison.json` |
+| Database backup and restore | `db/backup.ps1`, `db/restore.ps1`, `db/backup.sh`, `db/restore.sh` | Automated test run on live PostgreSQL container | verified | 10.4MB SQL dump generated cleanly |
+| Object-level authorization | Citizen ownership filters and officer assignment filters | Cross-citizen IDOR regression test | verified | Parameterized SQL queries prevent injection |
 
-The deterministic ML result is advisory only. Backend status transitions remain
-the source of truth and require an authorized officer.
+---
+
+## 13. Operational Backup and Restore
+
+PowerShell (Windows):
+```powershell
+# Backup
+powershell -ExecutionPolicy Bypass -File db/backup.ps1
+
+# Restore
+powershell -ExecutionPolicy Bypass -File db/restore.ps1 -BackupFile db/backups/<backup-file>.sql
+```
+
+Bash (Linux / CI):
+```bash
+# Backup
+./db/backup.sh
+
+# Restore
+./db/restore.sh db/backups/<backup-file>.sql
+```

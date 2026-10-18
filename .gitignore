@@ -14,3 +14,5 @@ coverage/
 __pycache__/
 *.pyc
 api/private-documents/
+db/backups/
+*.sql.bak

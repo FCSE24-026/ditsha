@@ -8,6 +8,14 @@ const path = require('path');
 const multer = require('multer');
 const config = require('../config');
 
+// Access SSE broadcaster registered in index.js (no-op if not yet set)
+function broadcastQueueUpdate(req, landBoardId) {
+  try {
+    const fn = req.app && req.app.locals && req.app.locals.broadcastQueueUpdate;
+    if (typeof fn === 'function') fn(landBoardId);
+  } catch { /* non-critical */ }
+}
+
 const VALID_STATUSES = new Set([
   'draft',
   'submitted',
@@ -839,6 +847,14 @@ router.post('/officer/applications/:id/assign', officerAuth, async (req, res) =>
     );
 
     await client.query('COMMIT');
+
+    // Broadcast queue update to both land boards affected by reassignment
+    const lbRow = await db.query('SELECT land_board_id FROM application WHERE application_id = $1', [req.params.id]);
+    if (lbRow.rowCount) broadcastQueueUpdate(req, lbRow.rows[0].land_board_id);
+    if (targetOfficer.rows[0].land_board_id !== (lbRow.rows[0]?.land_board_id)) {
+      broadcastQueueUpdate(req, targetOfficer.rows[0].land_board_id);
+    }
+
     res.json({
       application_id: req.params.id,
       assigned_officer_id: officer_id,
@@ -972,6 +988,11 @@ router.post('/officer/applications/:id/status', officerAuth, async (req, res) =>
     );
 
     await client.query('COMMIT');
+
+    // Broadcast SSE queue update AFTER commit so clients see consistent DB state
+    const appRow = await db.query('SELECT land_board_id FROM application WHERE application_id = $1', [req.params.id]);
+    if (appRow.rowCount) broadcastQueueUpdate(req, appRow.rows[0].land_board_id);
+
     res.json({ application_id: req.params.id, status, current_stage: nextStage });
   } catch (err) {
     await client.query('ROLLBACK');

@@ -13,6 +13,15 @@ MODEL_VERSION = "rules-1"
 app = FastAPI(title="Ditsha ML Assistance", version="0.1.0")
 
 
+def _age_days(submitted_at: datetime | None) -> float:
+    if submitted_at is None:
+        return 0.0
+    if submitted_at.tzinfo is None:
+        submitted_at = submitted_at.replace(tzinfo=timezone.utc)
+    delta = datetime.now(timezone.utc) - submitted_at
+    return max(0.0, delta.total_seconds() / 86400.0)
+
+
 class ApplicationFeatures(BaseModel):
     application_id: str
     application_type: str
@@ -64,13 +73,7 @@ def assist(features: ApplicationFeatures) -> AssistanceResponse:
 
     # Transparent queue priority formula:
     # Based on completeness (weight 0.4), application age (weight 0.4), and land board workload factor (weight 0.2)
-    age_days = 0.0
-    if features.submitted_at:
-        try:
-            delta = datetime.now(timezone.utc) - features.submitted_at
-            age_days = max(0.0, delta.total_seconds() / 86400.0)
-        except Exception:
-            age_days = 0.0
+    age_days = _age_days(features.submitted_at)
 
     # Age factor: normalized up to 90 days
     age_factor = min(1.0, age_days / 90.0)

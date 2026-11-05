@@ -26,8 +26,18 @@ DELETE FROM officer o1
   WHERE o1.created_at > o2.created_at
     AND lower(o1.email) = lower(o2.email);
 
-ALTER TABLE officer ADD CONSTRAINT officer_email_unique UNIQUE (email);
-
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'officer_email_unique'
+      AND conrelid = 'public.officer'::regclass
+  ) THEN
+    ALTER TABLE public.officer
+      ADD CONSTRAINT officer_email_unique UNIQUE (email);
+  END IF;
+END $$;
 -- ── Role and permission tables ───────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS officer_role (
   role_id     UUID PRIMARY KEY,

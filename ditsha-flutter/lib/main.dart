@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'dart:convert';
+import 'dart:async';
 
 void main() {
   runApp(const MyApp());
@@ -442,6 +443,7 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  Timer? _statusRefreshTimer;
   final description = TextEditingController();
   final applicationId = TextEditingController();
   final responseText = TextEditingController();
@@ -469,6 +471,23 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     loadAll();
+    _statusRefreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (mounted && !busy) {
+        loadCitizenData();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _statusRefreshTimer?.cancel();
+    description.dispose();
+    applicationId.dispose();
+    responseText.dispose();
+    editName.dispose();
+    editPhone.dispose();
+    editDistrict.dispose();
+    super.dispose();
   }
 
   Future<void> loadAll() async {
@@ -533,10 +552,24 @@ class _HomePageState extends State<HomePage> {
         notifications = List<Map<String, dynamic>>.from(
             results[1]['notifications'] ?? const []);
       });
+      await refreshApplicationStatus();
     } catch (exception) {
       if (mounted)
         setState(
             () => error = exception.toString().replaceFirst('Exception: ', ''));
+    }
+  }
+
+  Future<void> refreshApplicationStatus() async {
+    final selectedId = application?['application_id']?.toString();
+    if (selectedId == null) return;
+    try {
+      final response = await widget.api.request('/applications/$selectedId');
+      if (mounted) {
+        setState(() => application = response);
+      }
+    } catch (_) {
+      // The next scheduled refresh or manual refresh can recover transient failures.
     }
   }
 

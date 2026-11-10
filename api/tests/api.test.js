@@ -186,6 +186,12 @@ describe('API request validation and full lifecycle', () => {
     expect(reqInfo.statusCode).toBe(200);
     expect(reqInfo.body.status).toBe('information_requested');
 
+    const citizenDetailAfterRequest = await request(app)
+      .get(`/api/applications/${appId}`)
+      .set(citizenHeaders);
+    expect(citizenDetailAfterRequest.statusCode).toBe(200);
+    expect(citizenDetailAfterRequest.body.status).toBe('information_requested');
+
     // 4. Citizen responds
     const respond = await request(app)
       .post(`/api/applications/${appId}/respond`)

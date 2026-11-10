@@ -64,7 +64,10 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, callback) => {
     const allowed = new Set(['application/pdf', 'image/jpeg', 'image/png']);
-    callback(null, allowed.has(file.mimetype));
+    if (!allowed.has(file.mimetype)) {
+      return callback(new multer.MulterError('LIMIT_UNEXPECTED_FILE', 'document'));
+    }
+    callback(null, true);
   },
 });
 

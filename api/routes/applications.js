@@ -80,6 +80,7 @@ function validateFileSignature(filePath, mimetype) {
     if (mimetype === 'application/pdf') {
       return buffer.subarray(0, 4).toString('ascii') === '%PDF';
     }
+
     if (mimetype === 'image/jpeg') {
       return buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
     }
@@ -90,6 +91,27 @@ function validateFileSignature(filePath, mimetype) {
   } catch {
     return false;
   }
+}
+
+function inferDocumentType(originalName, requestedType) {
+  const normalized = requestedType || originalName;
+  const value = normalized.toLowerCase().replace(/[\s-]+/g, '_');
+  if (value.includes('identity') || value.includes('id_document') || value.includes('passport')) {
+    return 'identity_document';
+  }
+  if (value.includes('proof') && value.includes('residen')) {
+    return 'proof_of_residence';
+  }
+  if (value.includes('transfer') || value.includes('consent')) {
+    return 'transfer_consent';
+  }
+  if (value.includes('lease')) {
+    return 'existing_lease';
+  }
+  if (value.includes('planning') || value.includes('statement')) {
+    return 'planning_statement';
+  }
+  return 'supporting_document';
 }
 
 function isUuid(value) {
@@ -388,7 +410,8 @@ router.get('/applications/:id', authMiddleware, async (req, res) => {
       `SELECT a.*, lb.name AS land_board_name
        FROM application a
        LEFT JOIN land_board lb ON lb.land_board_id = a.land_board_id
-       WHERE a.application_id = $1 AND a.citizen_id = $2`,
+       WHERE (a.application_id::text = $1 OR lower(a.reference_number) = lower($1))
+         AND a.citizen_id = $2`,
       [req.params.id, req.user.citizen_id],
     );
     if (result.rowCount === 0) return res.status(404).json({ message: 'Not found' });
@@ -401,7 +424,9 @@ router.get('/applications/:id', authMiddleware, async (req, res) => {
         [a.application_id],
       ),
       db.query(
-        `SELECT document_id, original_name, content_type, byte_size, scan_status, created_at
+        `SELECT document_id, original_name, content_type, byte_size, document_type,
+                checksum_sha256, version, replaced_document_id, superseded_at,
+                deleted_at, scan_status, created_at
          FROM application_document WHERE application_id = $1 ORDER BY created_at DESC`,
         [a.application_id],
       ),
@@ -445,46 +470,96 @@ router.post('/applications/:id/documents', authMiddleware, upload.single('docume
     return res.status(400).json({ message: 'Uploaded file signature does not match expected format' });
   }
 
+  const documentType = inferDocumentType(req.file.originalname, req.body.document_type);
+  const checksum = crypto.createHash('sha256').update(fs.readFileSync(req.file.path)).digest('hex');
+  const client = await db.pool.connect();
   try {
-    const ownership = await db.query(
+    await client.query('BEGIN');
+    const ownership = await client.query(
       'SELECT application_id, current_status FROM application WHERE application_id = $1 AND citizen_id = $2',
       [req.params.id, req.user.citizen_id],
     );
     if (!ownership.rowCount) {
+      await client.query('ROLLBACK');
       fs.rmSync(req.file.path, { force: true });
       return res.status(404).json({ message: 'Application not found' });
     }
 
     const appStatus = ownership.rows[0].current_status;
     if (appStatus === 'approved' || appStatus === 'rejected' || appStatus === 'withdrawn') {
+      await client.query('ROLLBACK');
       fs.rmSync(req.file.path, { force: true });
       return res.status(400).json({ message: `Cannot upload documents to a ${appStatus} application` });
     }
 
-    const result = await db.query(
+    const previous = await client.query(
+      `SELECT document_id, version
+       FROM application_document
+       WHERE application_id = $1
+         AND document_type = $2
+         AND deleted_at IS NULL
+         AND superseded_at IS NULL
+       ORDER BY version DESC
+       LIMIT 1
+       FOR UPDATE`,
+      [req.params.id, documentType],
+    );
+    const previousDocument = previous.rows[0];
+    const version = previousDocument ? previousDocument.version + 1 : 1;
+    if (previousDocument) {
+      await client.query(
+        'UPDATE application_document SET superseded_at = NOW() WHERE document_id = $1',
+        [previousDocument.document_id],
+      );
+    }
+
+    const result = await client.query(
       `INSERT INTO application_document
-       (document_id, application_id, uploaded_by_citizen_id, original_name, storage_name, content_type, byte_size)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
-       RETURNING document_id, original_name, content_type, byte_size, scan_status, created_at`,
-      [crypto.randomUUID(), req.params.id, req.user.citizen_id, req.file.originalname, path.basename(req.file.path), req.file.mimetype, req.file.size],
+       (document_id, application_id, uploaded_by_citizen_id, original_name, storage_name, content_type, byte_size,
+        document_type, checksum_sha256, version, replaced_document_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       RETURNING document_id, original_name, content_type, byte_size, document_type,
+                 checksum_sha256, version, replaced_document_id, scan_status, created_at`,
+      [
+        crypto.randomUUID(),
+        req.params.id,
+        req.user.citizen_id,
+        req.file.originalname,
+        path.basename(req.file.path),
+        req.file.mimetype,
+        req.file.size,
+        documentType,
+        checksum,
+        version,
+        previousDocument ? previousDocument.document_id : null,
+      ],
     );
 
     // Update document_complete flag if all required documents present
-    const appInfo = await db.query('SELECT application_type FROM application WHERE application_id = $1', [req.params.id]);
+    const appInfo = await client.query('SELECT application_type FROM application WHERE application_id = $1', [req.params.id]);
     const reqDocs = REQUIRED_DOCUMENTS[appInfo.rows[0]?.application_type] || [];
-    const allDocs = await db.query('SELECT original_name FROM application_document WHERE application_id = $1', [req.params.id]);
+    const allDocs = await client.query(
+      `SELECT DISTINCT document_type
+       FROM application_document
+       WHERE application_id = $1 AND deleted_at IS NULL AND superseded_at IS NULL`,
+      [req.params.id],
+    );
     if (reqDocs.length > 0 && allDocs.rowCount >= reqDocs.length) {
-      await db.query('UPDATE application SET document_complete = TRUE WHERE application_id = $1', [req.params.id]);
+      await client.query('UPDATE application SET document_complete = TRUE WHERE application_id = $1', [req.params.id]);
     }
 
+    await client.query('COMMIT');
     res.status(201).json({
       document: result.rows[0],
       scan_notice: 'Malware scanning is unavailable in local development; document remains unverified.',
     });
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     fs.rmSync(req.file.path, { force: true });
     console.error(err);
     res.status(500).json({ message: 'Unable to store document' });
+  } finally {
+    client.release();
   }
 });
 
@@ -1023,7 +1098,15 @@ router.get('/officer/applications/:id', officerAuth, async (req, res) => {
 
     const [events, documents, notes, prediction, assignments] = await Promise.all([
       db.query('SELECT * FROM application_event WHERE application_id = $1 ORDER BY event_timestamp DESC', [req.params.id]),
-      db.query('SELECT document_id, original_name, content_type, byte_size, scan_status, created_at FROM application_document WHERE application_id = $1 ORDER BY created_at DESC', [req.params.id]),
+      db.query(
+        `SELECT document_id, original_name, content_type, byte_size, document_type,
+                checksum_sha256, version, replaced_document_id, superseded_at,
+                deleted_at, scan_status, created_at
+         FROM application_document
+         WHERE application_id = $1
+         ORDER BY created_at DESC`,
+        [req.params.id],
+      ),
       db.query('SELECT note_id, body, citizen_visible, created_at FROM application_note WHERE application_id = $1 ORDER BY created_at DESC', [req.params.id]),
       db.query('SELECT * FROM ml_prediction WHERE application_id = $1 ORDER BY created_at DESC LIMIT 1', [req.params.id]),
       db.query(`SELECT aa.assignment_id, aa.created_at, o.full_name AS assigned_to, by_o.full_name AS assigned_by

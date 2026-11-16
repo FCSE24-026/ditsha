@@ -60,6 +60,60 @@ describe('API request validation and full lifecycle', () => {
     expect(analytics.body.total_applications).toBeGreaterThan(0);
   }, 15000);
 
+  it('uses the same submitted reference number for citizen and officer views', async () => {
+    const citizenLogin = await request(app)
+      .post('/api/auth/citizen/login')
+      .send({ email: 'citizen@example.com', password: 'CitizenPass123!' });
+    const citizenHeaders = { Authorization: `Bearer ${citizenLogin.body.token}` };
+    const officerLogin = await request(app)
+      .post('/api/auth/officer/login')
+      .send({ email: 'officer@example.com', password: 'OfficerPass123!' });
+    const officerHeaders = { Authorization: `Bearer ${officerLogin.body.token}` };
+    const board = await db.query('SELECT land_board_id FROM land_board LIMIT 1');
+
+    const submission = await request(app)
+      .post('/api/applications')
+      .set(citizenHeaders)
+      .send({
+        application_type: 'residential_allocation',
+        land_board_id: board.rows[0].land_board_id,
+        description: 'Reference consistency check',
+      });
+    expect(submission.statusCode).toBe(200);
+      const officer = await db.query(
+        'SELECT officer_id FROM officer WHERE land_board_id = $1 LIMIT 1',
+        [board.rows[0].land_board_id],
+      );
+      expect(officer.rowCount).toBeGreaterThan(0);
+      await db.query(
+        'UPDATE application SET assigned_officer_id = $1 WHERE application_id = $2',
+        [officer.rows[0].officer_id, submission.body.application_id],
+      );
+
+      const citizenApplications = await request(app)
+      .get('/api/applications')
+      .set(citizenHeaders);
+    const officerApplications = await request(app)
+      .get(`/api/officer/applications?search=${submission.body.reference_number}`)
+      .set(officerHeaders);
+
+    const citizenApplication = citizenApplications.body.applications.find(
+      (item) => item.application_id === submission.body.application_id,
+    );
+    const officerApplication = officerApplications.body.applications.find(
+      (item) => item.application_id === submission.body.application_id,
+    );
+    expect(citizenApplication.reference_number).toBe(submission.body.reference_number);
+    expect(officerApplication.reference_number).toBe(submission.body.reference_number);
+
+    const lookupByReference = await request(app)
+      .get(`/api/applications/${encodeURIComponent(submission.body.reference_number)}`)
+      .set(citizenHeaders);
+    expect(lookupByReference.statusCode).toBe(200);
+    expect(lookupByReference.body.application_id).toBe(submission.body.application_id);
+    expect(lookupByReference.body.reference_number).toBe(submission.body.reference_number);
+  }, 15000);
+
   it('allows citizen to view and update profile', async () => {
     const login = await request(app)
       .post('/api/auth/citizen/login')
@@ -136,10 +190,38 @@ describe('API request validation and full lifecycle', () => {
     const validUpload = await request(app)
       .post(`/api/applications/${appId}/documents`)
       .set(citizenHeaders)
+      .field('document_type', 'identity_document')
       .attach('document', validPdfBytes, { filename: 'valid_id.pdf', contentType: 'application/pdf' });
     expect(validUpload.statusCode).toBe(201);
     expect(validUpload.body.document.original_name).toBe('valid_id.pdf');
+    expect(validUpload.body.document.document_type).toBe('identity_document');
+    expect(validUpload.body.document.version).toBe(1);
+    expect(validUpload.body.document.checksum_sha256).toMatch(/^[a-f0-9]{64}$/);
     const docId = validUpload.body.document.document_id;
+
+    const replacementUpload = await request(app)
+      .post(`/api/applications/${appId}/documents`)
+      .set(citizenHeaders)
+      .field('document_type', 'identity_document')
+      .attach('document', Buffer.from('%PDF-1.7\nreplacement document\n%%EOF'), {
+        filename: 'valid_id_replacement.pdf',
+        contentType: 'application/pdf',
+      });
+    expect(replacementUpload.statusCode).toBe(201);
+    expect(replacementUpload.body.document.version).toBe(2);
+    expect(replacementUpload.body.document.replaced_document_id).toBe(docId);
+
+    const documentRows = await db.query(
+      `SELECT version, superseded_at, checksum_sha256
+       FROM application_document
+       WHERE application_id = $1 AND document_type = 'identity_document'
+       ORDER BY version`,
+      [appId],
+    );
+    expect(documentRows.rows).toHaveLength(2);
+    expect(documentRows.rows[0].superseded_at).not.toBeNull();
+    expect(documentRows.rows[1].superseded_at).toBeNull();
+    expect(documentRows.rows[0].checksum_sha256).not.toBe(documentRows.rows[1].checksum_sha256);
 
     // Download document
     const download = await request(app)

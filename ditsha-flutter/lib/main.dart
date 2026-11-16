@@ -551,6 +551,9 @@ class _HomePageState extends State<HomePage> {
             results[0]['applications'] ?? const []);
         notifications = List<Map<String, dynamic>>.from(
             results[1]['notifications'] ?? const []);
+        if (application == null && applications.isNotEmpty) {
+          application = applications.first;
+        }
       });
       await refreshApplicationStatus();
     } catch (exception) {
@@ -662,9 +665,12 @@ class _HomePageState extends State<HomePage> {
     final targetId = idToLookup ?? applicationId.text.trim();
     if (targetId.isEmpty) return;
     await runRequest(() async {
-      final response = await widget.api.request('/applications/$targetId');
+      final response = await widget.api
+          .request('/applications/${Uri.encodeComponent(targetId)}');
       setState(() {
         application = response;
+        applicationId.text =
+            response['reference_number']?.toString() ?? targetId;
         message = 'Application status updated.';
       });
     });
@@ -716,6 +722,15 @@ class _HomePageState extends State<HomePage> {
       await lookupApplication(appId);
       await loadDrafts();
     });
+  }
+
+  Future<void> saveDraftAndUploadDocument() async {
+    if (editingDraftId == null) {
+      await saveDraft();
+    }
+    if (mounted && editingDraftId != null) {
+      await pickAndUploadDocument();
+    }
   }
 
   Future<void> respondToInformationRequest() async {
@@ -1311,12 +1326,10 @@ class _HomePageState extends State<HomePage> {
                     ),
                     const SizedBox(height: 14),
                     OutlinedButton.icon(
-                      onPressed: busy || editingDraftId == null
-                          ? null
-                          : pickAndUploadDocument,
+                      onPressed: busy ? null : saveDraftAndUploadDocument,
                       icon: const Icon(Icons.attach_file),
                       label: Text(editingDraftId == null
-                          ? 'Save draft first to upload documents'
+                          ? 'Save new application and upload document'
                           : 'Upload supporting document'),
                     ),
                     if (application?['documents'] is List &&

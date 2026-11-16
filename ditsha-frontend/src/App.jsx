@@ -830,6 +830,223 @@ function Dashboard({ session, onLogout }) {
   )
 }
 
+function AdminDashboard({ session, onLogout }) {
+  const [tab, setTab] = useState('overview')
+  const [metrics, setMetrics] = useState(null)
+  const [officers, setOfficers] = useState([])
+  const [roles, setRoles] = useState([])
+  const [config, setConfig] = useState([])
+  const [audit, setAudit] = useState([])
+  const [landBoards, setLandBoards] = useState([])
+  const [search, setSearch] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const [newOfficer, setNewOfficer] = useState({
+    full_name: '', email: '', password: '', role: 'clerk', land_board_id: '',
+  })
+  const [newRole, setNewRole] = useState({ name: '', description: '', permissions: '' })
+  const headers = { Authorization: `Bearer ${session.token}` }
+
+  const request = useCallback(async (path, options = {}) => (
+    apiRequest(path, { ...options, headers: { ...headers, ...(options.headers || {}) } })
+  ), [session.token])
+
+  const loadAdminData = useCallback(async () => {
+    setBusy(true)
+    setError('')
+    try {
+      const [metricData, officerData, roleData, configData, auditData, boardData] = await Promise.all([
+        request('/admin/metrics'),
+        request(`/admin/officers?search=${encodeURIComponent(search)}`),
+        request('/admin/roles'),
+        request('/admin/config'),
+        request('/admin/audit?limit=100'),
+        request('/land-boards'),
+      ])
+      setMetrics(metricData)
+      setOfficers(officerData.officers || [])
+      setRoles(roleData.roles || [])
+      setConfig(configData.config || [])
+      setAudit(auditData.events || [])
+      setLandBoards(boardData.land_boards || [])
+      setNewOfficer((value) => ({ ...value, land_board_id: value.land_board_id || boardData.land_boards?.[0]?.land_board_id || '' }))
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setBusy(false)
+    }
+  }, [request, search])
+
+  useEffect(() => { loadAdminData() }, [loadAdminData])
+
+  async function createOfficer(event) {
+    event.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      await request('/admin/officers', { method: 'POST', body: JSON.stringify(newOfficer) })
+      setSuccess('Officer created successfully.')
+      setNewOfficer({ full_name: '', email: '', password: '', role: 'clerk', land_board_id: landBoards[0]?.land_board_id || '' })
+      await loadAdminData()
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally { setBusy(false) }
+  }
+
+  async function deactivateOfficer(officer) {
+    if (!window.confirm(`Deactivate ${officer.full_name}?`)) return
+    try {
+      await request(`/admin/officers/${officer.officer_id}`, { method: 'DELETE' })
+      setSuccess('Officer deactivated and sessions revoked.')
+      await loadAdminData()
+    } catch (requestError) { setError(requestError.message) }
+  }
+
+  async function editOfficer(officer) {
+    const full_name = window.prompt('Officer full name', officer.full_name)
+    if (full_name === null) return
+    const role = window.prompt('Role: clerk, inspector, or manager', officer.role)
+    if (role === null) return
+    const land_board_id = window.prompt('Land board ID', officer.land_board_id)
+    if (land_board_id === null) return
+    try {
+      await request(`/admin/officers/${officer.officer_id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ full_name, role, land_board_id }),
+      })
+      setSuccess('Officer updated successfully.')
+      await loadAdminData()
+    } catch (requestError) { setError(requestError.message) }
+  }
+
+  async function createRole(event) {
+    event.preventDefault()
+    try {
+      await request('/admin/roles', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: newRole.name,
+          description: newRole.description,
+          permissions: newRole.permissions.split(',').map((item) => item.trim()).filter(Boolean),
+        }),
+      })
+      setSuccess('Role created successfully.')
+      setNewRole({ name: '', description: '', permissions: '' })
+      await loadAdminData()
+    } catch (requestError) { setError(requestError.message) }
+  }
+
+  async function editPermissions(role) {
+    const value = window.prompt('Permissions, comma separated', role.permissions.join(', '))
+    if (value === null) return
+    try {
+      await request(`/admin/roles/${role.role_id}/permissions`, {
+        method: 'PUT',
+        body: JSON.stringify({ permissions: value.split(',').map((item) => item.trim()).filter(Boolean) }),
+      })
+      setSuccess('Role permissions updated.')
+      await loadAdminData()
+    } catch (requestError) { setError(requestError.message) }
+  }
+
+  async function updateConfig(item) {
+    const value = window.prompt(`Update ${item.config_key}`, item.config_value)
+    if (value === null) return
+    try {
+      await request(`/admin/config/${encodeURIComponent(item.config_key)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ value, description: item.description }),
+      })
+      setSuccess('Configuration updated.')
+      await loadAdminData()
+    } catch (requestError) { setError(requestError.message) }
+  }
+
+  const statusCounts = Object.fromEntries((metrics?.application_status_breakdown || []).map((item) => [item.current_status, item.count]))
+  const nav = [
+    ['overview', 'Overview'], ['officers', 'Officers'], ['roles', 'Roles & permissions'],
+    ['config', 'Configuration'], ['audit', 'Audit log'],
+  ]
+
+  return (
+    <main className="app-shell">
+      <nav className="topbar">
+        <div className="wordmark"><span className="mini-mark">D</span> ditsha / admin</div>
+        <div className="topbar-right">
+          <span>{session.full_name} (Manager)</span>
+          <button className="quiet-button" onClick={onLogout}>Sign out</button>
+        </div>
+      </nav>
+      <section className="content">
+        <header className="page-heading">
+          <div>
+            <p className="eyebrow">Manager workspace</p>
+            <h1>Administration</h1>
+            <p className="muted">Manage access, platform settings, and operational accountability.</p>
+          </div>
+          <button className="secondary-button" onClick={loadAdminData} disabled={busy}>{busy ? 'Refreshing...' : 'Refresh data'}</button>
+        </header>
+        {error && <div className="alert">{error}</div>}
+        {success && <div className="success-message">{success}</div>}
+        <div className="admin-tabs">
+          {nav.map(([key, label]) => <button key={key} className={tab === key ? 'admin-tab active' : 'admin-tab'} onClick={() => { setTab(key); setError(''); setSuccess('') }}>{label}</button>)}
+        </div>
+
+        {tab === 'overview' && (
+          <>
+            <section className="stats-grid">
+              <Stat label="Total officers" value={metrics?.total_officers} accent="accent-teal" />
+              <Stat label="Total applications" value={Object.values(statusCounts).reduce((sum, value) => sum + Number(value), 0)} />
+              <Stat label="Awaiting review" value={statusCounts.submitted || 0} accent="accent-amber" />
+              <Stat label="Unread notifications" value={metrics?.unread_notifications} accent="accent-purple" />
+            </section>
+            <section className="queue-panel admin-card">
+              <div className="panel-heading"><div><h2>Application status</h2><p className="muted">System-wide operational snapshot.</p></div></div>
+              <div className="admin-status-grid">
+                {(metrics?.application_status_breakdown || []).map((item) => <div key={item.current_status}><strong>{item.count}</strong><span>{item.current_status.replaceAll('_', ' ')}</span></div>)}
+              </div>
+            </section>
+          </>
+        )}
+
+        {tab === 'officers' && (
+          <>
+            <section className="queue-panel admin-card">
+              <div className="panel-heading"><div><h2>Officer accounts</h2><p className="muted">{officers.length} accounts shown</p></div><input className="search-input" placeholder="Search name or email..." value={search} onChange={(event) => setSearch(event.target.value)} /></div>
+              <div className="table-wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Land board</th><th>Actions</th></tr></thead><tbody>
+                {officers.map((officer) => <tr key={officer.officer_id}><td>{officer.full_name}</td><td>{officer.email}</td><td>{officer.role}</td><td>{officer.land_board_name || '—'}</td><td className="actions"><button className="action-btn" onClick={() => editOfficer(officer)}>Edit</button>{officer.officer_id !== session.officer_id && officer.role !== 'deactivated' ? <button className="danger-button" onClick={() => deactivateOfficer(officer)}>Deactivate</button> : <span className="muted">Protected</span>}</td></tr>)}
+              </tbody></table></div>
+            </section>
+            <section className="queue-panel admin-card">
+              <div className="panel-heading"><div><h2>Create officer</h2><p className="muted">Provision a role-scoped account.</p></div></div>
+              <form className="admin-form" onSubmit={createOfficer}>
+                <input required placeholder="Full name" value={newOfficer.full_name} onChange={(e) => setNewOfficer({ ...newOfficer, full_name: e.target.value })} />
+                <input required type="email" placeholder="Email" value={newOfficer.email} onChange={(e) => setNewOfficer({ ...newOfficer, email: e.target.value })} />
+                <input required minLength="10" placeholder="Temporary password (10+ characters)" value={newOfficer.password} onChange={(e) => setNewOfficer({ ...newOfficer, password: e.target.value })} />
+                <select value={newOfficer.role} onChange={(e) => setNewOfficer({ ...newOfficer, role: e.target.value })}><option value="clerk">Clerk</option><option value="inspector">Inspector</option><option value="manager">Manager</option></select>
+                <select required value={newOfficer.land_board_id} onChange={(e) => setNewOfficer({ ...newOfficer, land_board_id: e.target.value })}>{landBoards.map((board) => <option key={board.land_board_id} value={board.land_board_id}>{board.name}</option>)}</select>
+                <button className="primary-button" disabled={busy}>Create officer</button>
+              </form>
+            </section>
+          </>
+        )}
+
+        {tab === 'roles' && (
+          <>
+            <section className="queue-panel admin-card"><div className="panel-heading"><div><h2>Roles & permissions</h2><p className="muted">Available role definitions and granted capabilities.</p></div></div><div className="admin-list">{roles.map((role) => <article key={role.role_id} className="admin-list-item"><div><strong>{role.name}</strong><p className="muted">{role.description || 'No description'}</p></div><div className="permission-list">{role.permissions.map((permission) => <span key={permission} className="status status-under_review">{permission}</span>)}<button className="action-btn" onClick={() => editPermissions(role)}>Edit permissions</button></div></article>)}</div></section>
+            <section className="queue-panel admin-card"><div className="panel-heading"><div><h2>Create role</h2></div></div><form className="admin-form" onSubmit={createRole}><input required placeholder="Role name" value={newRole.name} onChange={(e) => setNewRole({ ...newRole, name: e.target.value })} /><input placeholder="Description" value={newRole.description} onChange={(e) => setNewRole({ ...newRole, description: e.target.value })} /><input placeholder="Permissions, comma separated" value={newRole.permissions} onChange={(e) => setNewRole({ ...newRole, permissions: e.target.value })} /><button className="primary-button">Create role</button></form></section>
+          </>
+        )}
+
+        {tab === 'config' && <section className="queue-panel admin-card"><div className="panel-heading"><div><h2>System configuration</h2><p className="muted">Update runtime settings without editing deployment files.</p></div></div><div className="table-wrap"><table><thead><tr><th>Key</th><th>Value</th><th>Description</th><th>Action</th></tr></thead><tbody>{config.map((item) => <tr key={item.config_key}><td><strong>{item.config_key}</strong></td><td>{item.config_value}</td><td>{item.description || '—'}</td><td><button className="action-btn" onClick={() => updateConfig(item)}>Edit value</button></td></tr>)}</tbody></table></div></section>}
+
+        {tab === 'audit' && <section className="queue-panel admin-card"><div className="panel-heading"><div><h2>Audit log</h2><p className="muted">Recent workflow and administrative events.</p></div></div><div className="table-wrap"><table><thead><tr><th>Time</th><th>Event</th><th>Officer</th><th>Application</th><th>Notes</th></tr></thead><tbody>{audit.map((event) => <tr key={event.event_id}><td>{new Date(event.event_timestamp).toLocaleString()}</td><td>{event.event_type?.replaceAll('_', ' ')}</td><td>{event.officer_name || 'System'}</td><td>{event.application_id || '—'}</td><td>{event.notes || '—'}</td></tr>)}</tbody></table></div></section>}
+      </section>
+    </main>
+  )
+}
+
 export default function App() {
   const [session, setSession] = useState(() => JSON.parse(localStorage.getItem('ditsha-officer') || 'null'))
   function login(nextSession) {
@@ -840,5 +1057,7 @@ export default function App() {
     localStorage.removeItem('ditsha-officer')
     setSession(null)
   }
-  return session ? <Dashboard session={session} onLogout={logout} /> : <Login onLogin={login} />
+  return session
+    ? (session.officer_role === 'manager' ? <AdminDashboard session={session} onLogout={logout} /> : <Dashboard session={session} onLogout={logout} />)
+    : <Login onLogin={login} />
 }

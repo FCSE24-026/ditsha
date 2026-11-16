@@ -21,7 +21,7 @@
         120
       ]
     ],
-    "training_ms": 189.385
+    "training_ms": 85.55
   },
   "decision-tree": {
     "precision": 1.0,
@@ -38,7 +38,7 @@
         120
       ]
     ],
-    "training_ms": 21.818
+    "training_ms": 14.913
   },
   "random-forest": {
     "precision": 1.0,
@@ -55,6 +55,6 @@
         120
       ]
     ],
-    "training_ms": 349.027
+    "training_ms": 245.86
   }
 }

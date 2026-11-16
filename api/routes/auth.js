@@ -152,7 +152,14 @@ router.post('/officer/login', async (req, res) => {
       officer_role: user.role,
     };
     const tokens = await issueTokenPair(payload);
-    res.json({ officer_id: user.officer_id, full_name: user.full_name, land_board_id: user.land_board_id, ...tokens });
+    res.json({
+      officer_id: user.officer_id,
+      full_name: user.full_name,
+      land_board_id: user.land_board_id,
+      role: 'officer',
+      officer_role: user.role,
+      ...tokens,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
